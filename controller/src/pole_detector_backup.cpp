@@ -112,7 +112,7 @@ void PoleDetector::performClustering(const pcl::PointCloud<pcl::PointXYZ>::Ptr& 
     RCLCPP_INFO(this->get_logger(), "Se encontraron %zu clusters", cluster_indices.size());
 
     int cylindrical_count = 0;
-    size_t total_clusters = cluster_indices.size();
+    int total_clusters = cluster_indices.size();
 
     // Crear una nube de puntos RGB para los postes detectados (color verde)
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr poles_cloud(new pcl::PointCloud<pcl::PointXYZRGB>());

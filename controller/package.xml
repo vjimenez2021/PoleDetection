@@ -3,7 +3,7 @@
 <package format="3">
   <name>controller</name>
   <version>0.0.0</version>
-  <description>Pole detector with clustering</description>
+  <description>Pole detector with shape classification</description>
   <maintainer email="v.jimenez.2021@alumnos.urjc.es">victorjt</maintainer>
   <license>Apache License 2.0</license>
 
@@ -15,6 +15,8 @@
   
   <build_depend>libpcl-dev</build_depend>
   <exec_depend>libpcl-dev</exec_depend>
+  <build_depend>libeigen3-dev</build_depend>
+  <exec_depend>libeigen3-dev</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

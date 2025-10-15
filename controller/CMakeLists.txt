@@ -10,7 +10,8 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(pcl_conversions REQUIRED)
-find_package(PCL REQUIRED COMPONENTS segmentation kdtree search)
+find_package(PCL REQUIRED COMPONENTS segmentation kdtree search features common)
+find_package(Eigen3 REQUIRED)
 
 set(dependencies
   rclcpp
@@ -21,6 +22,7 @@ set(dependencies
 include_directories(
   include
   ${PCL_INCLUDE_DIRS}
+  ${Eigen3_INCLUDE_DIRS}
 )
 
 # Link directories para PCL
@@ -36,6 +38,7 @@ add_executable(pole_detector_main
 ament_target_dependencies(pole_detector_main ${dependencies})
 target_link_libraries(pole_detector_main
   ${PCL_LIBRARIES}
+  Eigen3::Eigen
 )
 
 # Install
