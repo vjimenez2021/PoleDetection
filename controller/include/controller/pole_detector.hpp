@@ -20,6 +20,7 @@ private:
     void analyzeClusterShape(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cluster, size_t cluster_id);
     bool isCylindrical(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cluster);
     bool fitCylinderRANSAC(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cluster);
+    bool isPoleLikeSimple(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cluster);
     
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filtered_cloud_pub_;
