@@ -7,19 +7,19 @@
 #include <Eigen/Dense>
 
 PoleDetector::PoleDetector() : Node("pole_detector") {
-    // Parámetros para filtrado por altura
-    this->declare_parameter("min_height", 0.2);       // Altura mínima (metros)
-    this->declare_parameter("max_height", 8.0);       // Altura máxima (metros)
-    this->declare_parameter("cluster_tolerance", 5.5); // Distancia para clustering (metros)
-    this->declare_parameter("min_cluster_size", 1);   // Mínimo puntos por cluster
-    this->declare_parameter("max_cluster_size", 1000); // Máximo puntos por cluster
+    // Height filtering parameters
+    this->declare_parameter("min_height", 0.2);
+    this->declare_parameter("max_height", 8.0);
+    this->declare_parameter("cluster_tolerance", 5.5);
+    this->declare_parameter("min_cluster_size", 1);
+    this->declare_parameter("max_cluster_size", 1000);
     
-    // Parámetros para detección de formas cilíndricas
-    this->declare_parameter("min_cylindrical_aspect_ratio", 0.0); // Relación altura/ancho mínima
-    this->declare_parameter("max_cylindrical_width", 0.4);       // Ancho máximo para cilindro (metros)
-    this->declare_parameter("cylinder_distance_threshold", 0.05); // Umbral para RANSAC
-    this->declare_parameter("min_cylinder_radius", 0.05);        // Radio mínimo (metros)
-    this->declare_parameter("max_cylinder_radius", 3.3);         // Radio máximo (metros)
+    // Cylindrical shape detection parameters
+    this->declare_parameter("min_cylindrical_aspect_ratio", 0.0);
+    this->declare_parameter("max_cylindrical_width", 0.4);
+    this->declare_parameter("cylinder_distance_threshold", 0.05);
+    this->declare_parameter("min_cylinder_radius", 0.05);
+    this->declare_parameter("max_cylinder_radius", 3.3);
     
     this->get_parameter("min_height", min_height_);
     this->get_parameter("max_height", max_height_);
@@ -32,24 +32,24 @@ PoleDetector::PoleDetector() : Node("pole_detector") {
     this->get_parameter("min_cylinder_radius", min_cylinder_radius_);
     this->get_parameter("max_cylinder_radius", max_cylinder_radius_);
 
-    // Suscriptor a la nube de puntos del LIDAR
+    // LIDAR point cloud subscriber
     sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
         "/front_laser/points", 10,
         std::bind(&PoleDetector::cloudCallback, this, std::placeholders::_1));
     
-    // Publicador para la nube de puntos filtrada (normal)
+    // Filtered point cloud publisher
     filtered_cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
         "/filtered_cloud", 10);
 
-    // Nuevo publicador para los postes detectados (con color)
+    // Detected poles publisher (colored)
     poles_cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
         "/detected_poles", 10);
 
-    RCLCPP_INFO(this->get_logger(), "Pole Detector inicializado");
+    RCLCPP_INFO(this->get_logger(), "Pole Detector initialized");
 }
 
 void PoleDetector::cloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
-    // Convertir ROS -> PCL
+    // Convert ROS to PCL
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>());
     pcl::fromROSMsg(*msg, *cloud);
 
@@ -57,7 +57,7 @@ void PoleDetector::cloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr 
         return;
     }
 
-    // Filtrar por altura (z) - eliminar puntos pegados al suelo
+    // Filter by height (z) - remove ground points
     pcl::PassThrough<pcl::PointXYZ> pass;
     pass.setInputCloud(cloud);
     pass.setFilterFieldName("z");
@@ -70,23 +70,23 @@ void PoleDetector::cloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr 
         return;
     }
 
-    // Realizar clustering en la nube filtrada
+    // Perform clustering on filtered cloud
     performClustering(filtered_cloud, msg->header);
 
-    // Publicar la nube filtrada normal
+    // Publish filtered cloud
     sensor_msgs::msg::PointCloud2 filtered_msg;
     pcl::toROSMsg(*filtered_cloud, filtered_msg);
     filtered_msg.header = msg->header;
     filtered_cloud_pub_->publish(filtered_msg);
 }
 
-// Nueva función para detectar postes lejanos (sin RANSAC)
+// Detect far poles without RANSAC
 bool PoleDetector::isPoleLikeSimple(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cluster) {
-    if (cluster->size() < 3) {  // Menos puntos requeridos para lejanos
+    if (cluster->size() < 3) {
         return false;
     }
 
-    // Calcular dimensiones
+    // Calculate dimensions
     pcl::PointXYZ min_pt, max_pt;
     pcl::getMinMax3D(*cluster, min_pt, max_pt);
     
@@ -94,29 +94,27 @@ bool PoleDetector::isPoleLikeSimple(const pcl::PointCloud<pcl::PointXYZ>::Ptr& c
     double depth = max_pt.y - min_pt.y;
     double height = max_pt.z - min_pt.z;
     
-    // Criterios más flexibles para postes lejanos
+    // Flexible criteria for far poles
     double max_horizontal = std::max(width, depth);
     double aspect_ratio = height / max_horizontal;
     
-    // 1. Debe ser alto y delgado (criterios más relajados)
-    bool good_aspect_ratio = (aspect_ratio > 1.0);  // Más bajo que para cercanos
-    bool narrow_width = (max_horizontal < 1.6);     // Más ancho que para cercanos
-    
-    // 2. Debe tener una altura mínima razonable
-    bool sufficient_height = (height > 0.4);        // Más bajo que para cercanos
+    // Tall and thin criteria (relaxed)
+    bool good_aspect_ratio = (aspect_ratio > 1.0);
+    bool narrow_width = (max_horizontal < 1.6);
+    bool sufficient_height = (height > 0.4);
 
     return good_aspect_ratio && narrow_width && sufficient_height;
 }
 
 void PoleDetector::performClustering(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud, const std_msgs::msg::Header& header) {
-    // Crear el árbol KdTree para la búsqueda de vecinos
+    // Create KdTree for neighbor search
     pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>());
     tree->setInputCloud(cloud);
 
-    // Vector para almacenar los índices de los clusters
+    // Vector for cluster indices
     std::vector<pcl::PointIndices> cluster_indices;
     
-    // Configurar el extractor de clusters euclidianos
+    // Configure Euclidean cluster extraction
     pcl::EuclideanClusterExtraction<pcl::PointXYZ> ec;
     ec.setClusterTolerance(cluster_tolerance_);
     ec.setMinClusterSize(min_cluster_size_);
@@ -128,17 +126,17 @@ void PoleDetector::performClustering(const pcl::PointCloud<pcl::PointXYZ>::Ptr& 
     int cylindrical_count = 0;
     size_t total_clusters = cluster_indices.size();
 
-    // Crear una nube de puntos RGB para los postes detectados (color verde)
+    // RGB point cloud for detected poles (green color)
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr poles_cloud(new pcl::PointCloud<pcl::PointXYZRGB>());
 
-    // Vector para almacenar distancias
+    // Vector to store distances
     std::vector<double> pole_distances;
 
-    // Analizar cada cluster
+    // Analyze each cluster
     for (size_t i = 0; i < total_clusters; ++i) {
         const pcl::PointIndices& indices = cluster_indices[i];
         
-        // Crear nube de puntos del cluster
+        // Create cluster point cloud
         pcl::PointCloud<pcl::PointXYZ>::Ptr cluster_cloud(new pcl::PointCloud<pcl::PointXYZ>());
         for (const auto& idx : indices.indices) {
             cluster_cloud->points.push_back(cloud->points[idx]);
@@ -147,7 +145,7 @@ void PoleDetector::performClustering(const pcl::PointCloud<pcl::PointXYZ>::Ptr& 
         cluster_cloud->height = 1;
         cluster_cloud->is_dense = true;
         
-        // Calcular distancia promedio del cluster
+        // Calculate average cluster distance
         double avg_distance = 0.0;
         for (const auto& point : cluster_cloud->points) {
             avg_distance += sqrt(point.x * point.x + point.y * point.y);
@@ -156,14 +154,14 @@ void PoleDetector::performClustering(const pcl::PointCloud<pcl::PointXYZ>::Ptr& 
         
         bool is_pole = false;
         
-        // Estrategia dual según distancia
+        // Dual strategy based on distance
         if (avg_distance <= 4.3) {
-            // Para clusters cercanos: usar tu método original con RANSAC
+            // Near clusters: original method with RANSAC
             if (isCylindrical(cluster_cloud) && fitCylinderRANSAC(cluster_cloud)) {
                 is_pole = true;
             }
         } else {
-            // Para clusters lejanos (>4.3m): usar método simple sin RANSAC
+            // Far clusters (>4.3m): simple method without RANSAC
             if (isPoleLikeSimple(cluster_cloud)) {
                 is_pole = true;
             }
@@ -173,21 +171,21 @@ void PoleDetector::performClustering(const pcl::PointCloud<pcl::PointXYZ>::Ptr& 
             cylindrical_count++;
             pole_distances.push_back(avg_distance);
             
-            // Añadir este cluster a la nube de postes con color VERDE
+            // Add cluster to poles cloud (GREEN color)
             for (const auto& idx : indices.indices) {
                 pcl::PointXYZRGB colored_point;
                 colored_point.x = cloud->points[idx].x;
                 colored_point.y = cloud->points[idx].y;
                 colored_point.z = cloud->points[idx].z;
-                colored_point.r = 0;    // Rojo
-                colored_point.g = 255;  // Verde (máximo)
-                colored_point.b = 0;    // Azul
+                colored_point.r = 0;
+                colored_point.g = 255;
+                colored_point.b = 0;
                 poles_cloud->points.push_back(colored_point);
             }
         }
     }
 
-    // Publicar la nube de postes detectados si hay alguno
+    // Publish detected poles if any
     if (!poles_cloud->empty()) {
         poles_cloud->width = poles_cloud->points.size();
         poles_cloud->height = 1;
@@ -199,49 +197,19 @@ void PoleDetector::performClustering(const pcl::PointCloud<pcl::PointXYZ>::Ptr& 
         poles_cloud_pub_->publish(poles_msg);
     }
 
-    // Mostrar resultados
+    // Show results
     RCLCPP_INFO(this->get_logger(), "Número de farolas detectadas: %d", cylindrical_count);
     for (size_t i = 0; i < pole_distances.size(); ++i) {
         RCLCPP_INFO(this->get_logger(), "Farola %zu: %.2f metros", i + 1, pole_distances[i]);
     }
 }
 
-void PoleDetector::analyzeClusterShape(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cluster, size_t cluster_id) {
-    if (cluster->size() < 10) {
-        return;
-    }
-
-    // Calcular dimensiones
-    pcl::PointXYZ min_pt, max_pt;
-    pcl::getMinMax3D(*cluster, min_pt, max_pt);
-    
-    double width = max_pt.x - min_pt.x;
-    double depth = max_pt.y - min_pt.y;
-    double height = max_pt.z - min_pt.z;
-    
-    // Calcular relación de aspecto (altura/ancho)
-    double max_horizontal = std::max(width, depth);
-    double aspect_ratio = height / max_horizontal;
-
-    // Análisis PCA para entender la forma
-    pcl::PCA<pcl::PointXYZ> pca;
-    pca.setInputCloud(cluster);
-    
-    Eigen::Vector3f eigenvalues = pca.getEigenValues();
-    Eigen::Matrix3f eigenvectors = pca.getEigenVectors();
-    
-    // Calcular medidas de forma
-    double linearity = (eigenvalues[0] - eigenvalues[1]) / eigenvalues[0];
-    double planarity = (eigenvalues[1] - eigenvalues[2]) / eigenvalues[0];
-    double scattering = eigenvalues[2] / eigenvalues[0];
-}
-
 bool PoleDetector::isCylindrical(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cluster) {
     if (cluster->size() < 30) {
-        return false; // Muy pequeño para ser un poste
+        return false;
     }
 
-    // Calcular dimensiones
+    // Calculate dimensions
     pcl::PointXYZ min_pt, max_pt;
     pcl::getMinMax3D(*cluster, min_pt, max_pt);
     
@@ -249,21 +217,21 @@ bool PoleDetector::isCylindrical(const pcl::PointCloud<pcl::PointXYZ>::Ptr& clus
     double depth = max_pt.y - min_pt.y;
     double height = max_pt.z - min_pt.z;
     
-    // Criterios para forma cilíndrica
+    // Cylindrical shape criteria
     double max_horizontal = std::max(width, depth);
     double aspect_ratio = height / max_horizontal;
     
-    // 1. Debe ser alto y delgado
+    // Tall and thin
     bool good_aspect_ratio = (aspect_ratio > min_cylindrical_aspect_ratio_);
     bool narrow_width = (max_horizontal < max_cylindrical_width_);
     
-    // 2. Análisis PCA para verificar forma lineal
+    // PCA for linear shape verification
     pcl::PCA<pcl::PointXYZ> pca;
     pca.setInputCloud(cluster);
     Eigen::Vector3f eigenvalues = pca.getEigenValues();
     double linearity = (eigenvalues[0] - eigenvalues[1]) / eigenvalues[0];
     
-    bool good_linearity = (linearity > 0.6); // Muy lineal
+    bool good_linearity = (linearity > 0.6);
 
     return good_aspect_ratio && narrow_width && good_linearity;
 }
@@ -273,7 +241,7 @@ bool PoleDetector::fitCylinderRANSAC(const pcl::PointCloud<pcl::PointXYZ>::Ptr& 
         return false;
     }
 
-    // Estimar normales
+    // Estimate normals
     pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> ne;
     pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>());
     ne.setSearchMethod(tree);
@@ -283,7 +251,7 @@ bool PoleDetector::fitCylinderRANSAC(const pcl::PointCloud<pcl::PointXYZ>::Ptr& 
     pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>());
     ne.compute(*normals);
 
-    // Segmentación RANSAC para cilindro
+    // RANSAC cylinder segmentation
     pcl::SACSegmentationFromNormals<pcl::PointXYZ, pcl::Normal> seg;
     seg.setOptimizeCoefficients(true);
     seg.setModelType(pcl::SACMODEL_CYLINDER);
@@ -305,5 +273,5 @@ bool PoleDetector::fitCylinderRANSAC(const pcl::PointCloud<pcl::PointXYZ>::Ptr& 
 
     double inlier_ratio = static_cast<double>(inliers->indices.size()) / cluster->size();
     
-    return (inlier_ratio > 0.3); // Al menos 30% de inliers
+    return (inlier_ratio > 0.3);
 }
