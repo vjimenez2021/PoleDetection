@@ -10,13 +10,17 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(pcl_conversions REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(PCL REQUIRED COMPONENTS segmentation kdtree search features common)
 find_package(Eigen3 REQUIRED)
+find_package(std_msgs REQUIRED)
 
 set(dependencies
   rclcpp
   sensor_msgs
   pcl_conversions
+  std_msgs
+  geometry_msgs
 )
 
 include_directories(
@@ -50,5 +54,11 @@ install(TARGETS
 install(DIRECTORY include/
   DESTINATION include
 )
+
+# Install launch files
+install(DIRECTORY launch/
+  DESTINATION share/${PROJECT_NAME}/launch
+)
+
 
 ament_package()
