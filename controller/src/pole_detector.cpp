@@ -5,6 +5,7 @@
 #include <pcl/common/common.h>
 #include <vector>
 #include <Eigen/Dense>
+#include <chrono>
 
 PoleDetector::PoleDetector() : Node("pole_detector") {
     // Height filtering parameters
@@ -68,6 +69,10 @@ PoleDetector::PoleDetector() : Node("pole_detector") {
 }
 
 void PoleDetector::cloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
+
+    // Initial time
+    auto start_time = std::chrono::steady_clock::now();
+
     // Convert ROS to PCL
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>());
     pcl::fromROSMsg(*msg, *cloud);
@@ -97,7 +102,14 @@ void PoleDetector::cloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr 
     pcl::toROSMsg(*filtered_cloud, filtered_msg);
     filtered_msg.header = msg->header;
     filtered_cloud_pub_->publish(filtered_msg);
+
+    // Final time
+    auto end_time = std::chrono::steady_clock::now();
+    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+
+    RCLCPP_INFO(this->get_logger(), "Callback ejecutado en %ld ms", duration_ms);
 }
+
 
 // Detect far poles without RANSAC
 bool PoleDetector::isPoleLikeSimple(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cluster) {
