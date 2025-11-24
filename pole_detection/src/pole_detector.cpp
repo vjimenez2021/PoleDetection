@@ -70,45 +70,47 @@ PoleDetector::PoleDetector() : Node("pole_detector") {
 
 void PoleDetector::cloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
 
-    // Initial time
-    auto start_time = std::chrono::steady_clock::now();
+    using clock = std::chrono::high_resolution_clock;
 
-    // Convert ROS to PCL
+    auto t0_total = clock::now();
+
+    // --- Tiempo conversión ROS→PCL ---
+    auto t0_conv = clock::now();
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>());
     pcl::fromROSMsg(*msg, *cloud);
+    auto t1_conv = clock::now();
+    auto conv_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1_conv - t0_conv).count();
 
-    if (cloud->empty()) {
-        return;
-    }
+    if (cloud->empty()) return;
 
-    // Filter by height (z) - remove ground points
+    // --- Tiempo filtrado PassThrough ---
+    auto t0_filt = clock::now();
     pcl::PassThrough<pcl::PointXYZ> pass;
     pass.setInputCloud(cloud);
     pass.setFilterFieldName("z");
     pass.setFilterLimits(min_height_, max_height_);
-    
     pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZ>());
     pass.filter(*filtered_cloud);
+    auto t1_filt = clock::now();
+    auto filt_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1_filt - t0_filt).count();
 
-    if (filtered_cloud->empty()) {
-        return;
-    }
+    if (filtered_cloud->empty()) return;
 
-    // Perform clustering on filtered cloud
+    // --- Tiempo clustering+clasificación+RANSAC ---
+    auto t0_cluster = clock::now();
     performClustering(filtered_cloud, msg->header);
+    auto t1_cluster = clock::now();
+    auto cluster_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1_cluster - t0_cluster).count();
 
-    // Publish filtered cloud
-    sensor_msgs::msg::PointCloud2 filtered_msg;
-    pcl::toROSMsg(*filtered_cloud, filtered_msg);
-    filtered_msg.header = msg->header;
-    filtered_cloud_pub_->publish(filtered_msg);
+    // --- Tiempo total del callback ---
+    auto t1_total = clock::now();
+    auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1_total - t0_total).count();
 
-    // Final time
-    auto end_time = std::chrono::steady_clock::now();
-    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-
-    RCLCPP_INFO(this->get_logger(), "Callback ejecutado en %ld ms", duration_ms);
+    RCLCPP_INFO(this->get_logger(),
+        "[TIMES] Conversión: %ld ms | Filtrado: %ld ms | Clustering+Clasificación+RANSAC: %ld ms | TOTAL: %ld ms",
+        conv_ms, filt_ms, cluster_ms, total_ms);
 }
+
 
 
 // Detect far poles without RANSAC
@@ -137,10 +139,25 @@ bool PoleDetector::isPoleLikeSimple(const pcl::PointCloud<pcl::PointXYZ>::Ptr& c
     return good_aspect_ratio && narrow_width && sufficient_height;
 }
 
-void PoleDetector::performClustering(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud, const std_msgs::msg::Header& header) {
+void PoleDetector::performClustering(
+    const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
+    const std_msgs::msg::Header& header)
+{
+    using clock = std::chrono::high_resolution_clock;
+
+    // =========================================================
+    // Tiempo construcción del KdTree
+    // =========================================================
+    auto t0_tree = clock::now();
     pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>());
     tree->setInputCloud(cloud);
+    auto t1_tree = clock::now();
+    auto tree_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1_tree - t0_tree).count();
 
+    // =========================================================
+    // Tiempo de clustering
+    // =========================================================
+    auto t0_cluster = clock::now();
     std::vector<pcl::PointIndices> cluster_indices;
     pcl::EuclideanClusterExtraction<pcl::PointXYZ> ec;
     ec.setClusterTolerance(cluster_tolerance_);
@@ -149,33 +166,42 @@ void PoleDetector::performClustering(const pcl::PointCloud<pcl::PointXYZ>::Ptr& 
     ec.setSearchMethod(tree);
     ec.setInputCloud(cloud);
     ec.extract(cluster_indices);
+    auto t1_cluster = clock::now();
+    auto cluster_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1_cluster - t0_cluster).count();
+
+    // =========================================================
+    // Tiempo de procesado de clusters (clasificación + RANSAC)
+    // =========================================================
+    auto t0_process = clock::now();
 
     int cylindrical_count = 0;
     size_t total_clusters = cluster_indices.size();
 
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr poles_cloud(new pcl::PointCloud<pcl::PointXYZRGB>());
     std::vector<double> pole_distances;
-    std::vector<std::pair<double, double>> pole_centers; // almacenar centros detectados
+    std::vector<std::pair<double, double>> pole_centers;
 
     for (size_t i = 0; i < total_clusters; ++i) {
+
         const pcl::PointIndices& indices = cluster_indices[i];
 
         pcl::PointCloud<pcl::PointXYZ>::Ptr cluster_cloud(new pcl::PointCloud<pcl::PointXYZ>());
         for (const auto& idx : indices.indices)
             cluster_cloud->points.push_back(cloud->points[idx]);
 
-        cluster_cloud->width = cluster_cloud->points.size();
+        cluster_cloud->width  = cluster_cloud->points.size();
         cluster_cloud->height = 1;
         cluster_cloud->is_dense = true;
 
         double avg_distance = 0.0;
         for (const auto& p : cluster_cloud->points)
-            avg_distance += sqrt(p.x * p.x + p.y * p.y);
+            avg_distance += std::sqrt(p.x * p.x + p.y * p.y);
         avg_distance /= cluster_cloud->size();
 
         bool is_pole = false;
         std::optional<std::pair<double, double>> cylinder_center;
 
+        // Cercanos → RANSAC
         if (avg_distance <= 4.3) {
             if (isCylindrical(cluster_cloud)) {
                 cylinder_center = fitCylinderRANSAC(cluster_cloud);
@@ -184,10 +210,11 @@ void PoleDetector::performClustering(const pcl::PointCloud<pcl::PointXYZ>::Ptr& 
                     pole_centers.push_back(cylinder_center.value());
                 }
             }
-        } else {
+        }
+        // Lejanos → modelo simplificado
+        else {
             if (isPoleLikeSimple(cluster_cloud)) {
                 is_pole = true;
-                // Aproximar el centro como el promedio de puntos del cluster
                 Eigen::Vector4f centroid;
                 pcl::compute3DCentroid(*cluster_cloud, centroid);
                 pole_centers.push_back({centroid[0], centroid[1]});
@@ -198,7 +225,6 @@ void PoleDetector::performClustering(const pcl::PointCloud<pcl::PointXYZ>::Ptr& 
             cylindrical_count++;
             pole_distances.push_back(avg_distance);
 
-            // Añadir al cloud coloreado
             for (const auto& idx : indices.indices) {
                 pcl::PointXYZRGB p;
                 p.x = cloud->points[idx].x;
@@ -210,9 +236,14 @@ void PoleDetector::performClustering(const pcl::PointCloud<pcl::PointXYZ>::Ptr& 
         }
     }
 
-    // Publicar nube coloreada
+    auto t1_process = clock::now();
+    auto process_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1_process - t0_process).count();
+
+    // =========================================================
+    // Publicación de nube coloreada
+    // =========================================================
     if (!poles_cloud->empty()) {
-        poles_cloud->width = poles_cloud->points.size();
+        poles_cloud->width  = poles_cloud->points.size();
         poles_cloud->height = 1;
         poles_cloud->is_dense = true;
 
@@ -222,7 +253,9 @@ void PoleDetector::performClustering(const pcl::PointCloud<pcl::PointXYZ>::Ptr& 
         poles_cloud_pub_->publish(poles_msg);
     }
 
-    // Publicar centros (x, y) en /pole/cylinders_center
+    // =========================================================
+    // Publicación de centros
+    // =========================================================
     if (!pole_centers.empty()) {
         std_msgs::msg::String msg;
         std::stringstream ss;
@@ -241,11 +274,19 @@ void PoleDetector::performClustering(const pcl::PointCloud<pcl::PointXYZ>::Ptr& 
         cylinder_centers_pub_->publish(msg);
     }
 
+    // =========================================================
+    // LOG de tiempos medidos
+    // =========================================================
+    RCLCPP_INFO(this->get_logger(),
+        "[STAGES] KdTree: %ld ms | Clustering: %ld ms | Procesado de clusters: %ld ms",
+        tree_ms, cluster_ms, process_ms);
+
     // Log tradicional
     RCLCPP_INFO(this->get_logger(), "Número de farolas detectadas: %d", cylindrical_count);
     for (size_t i = 0; i < pole_distances.size(); ++i)
         RCLCPP_INFO(this->get_logger(), "Farola %zu: %.2f metros", i + 1, pole_distances[i]);
 }
+
 
 bool PoleDetector::isCylindrical(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cluster) {
     if (cluster->size() < 30) {

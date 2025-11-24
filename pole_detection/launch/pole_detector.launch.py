@@ -14,13 +14,13 @@ def generate_launch_description():
                 {'max_height': 4.0},
 
                 # ----- Clustering -----
-                {'cluster_tolerance': 5.5},
+                {'cluster_tolerance': 0.5},
                 {'min_cluster_size': 10},
                 {'max_cluster_size': 100},
 
                 # ----- Criterios cilíndricos -----
                 {'min_cylindrical_aspect_ratio': 0.0},
-                {'max_cylindrical_width': 5.4},
+                {'max_cylindrical_width': 0.4},
                 {'cylinder_distance_threshold': 0.15},
                 {'min_cylinder_radius': 0.05},
                 {'max_cylinder_radius': 0.5},
