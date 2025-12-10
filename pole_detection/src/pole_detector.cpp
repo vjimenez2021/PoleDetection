@@ -8,21 +8,21 @@
 #include <chrono>
 
 PoleDetector::PoleDetector() : Node("pole_detector") {
-    // Height filtering parameters
+    // Parámetros de altura
     this->declare_parameter("min_height", 0.2);
     this->declare_parameter("max_height", 4.0);
     this->declare_parameter("cluster_tolerance", 5.5);
     this->declare_parameter("min_cluster_size", 10);
     this->declare_parameter("max_cluster_size", 100);
     
-    // Cylindrical shape detection parameters
+    // Parámetros de forma cilíndrica
     this->declare_parameter("min_cylindrical_aspect_ratio", 0.0);
     this->declare_parameter("max_cylindrical_width", 0.4);
     this->declare_parameter("cylinder_distance_threshold", 0.05);
     this->declare_parameter("min_cylinder_radius", 0.05);
     this->declare_parameter("max_cylinder_radius", 0.25);
 
-    // ----- RANSAC parameters -----
+    // Parámetros del RANSAC
     this->declare_parameter("ransac_inlier_ratio", 0.5);
     this->declare_parameter("ransac_min_cluster_points", 15);
     this->declare_parameter("ransac_normal_distance_weight", 0.1);
@@ -38,27 +38,25 @@ PoleDetector::PoleDetector() : Node("pole_detector") {
     this->get_parameter("cylinder_distance_threshold", cylinder_distance_threshold_);
     this->get_parameter("min_cylinder_radius", min_cylinder_radius_);
     this->get_parameter("max_cylinder_radius", max_cylinder_radius_);
-
-    // ----- Read RANSAC parameters -----
     this->get_parameter("ransac_inlier_ratio", ransac_inlier_ratio_);
     this->get_parameter("ransac_min_cluster_points", ransac_min_cluster_points_);
     this->get_parameter("ransac_normal_distance_weight", ransac_normal_distance_weight_);
     this->get_parameter("ransac_max_iterations", ransac_max_iterations_);
 
-    // LIDAR point cloud subscriber
+    // Subscriber del LIDAR
     sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
         "/front_laser/points", 10,
         std::bind(&PoleDetector::cloudCallback, this, std::placeholders::_1));
     
-    // Filtered point cloud publisher
+    // Publicador de la nube filtrada
     filtered_cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
         "/filtered_cloud", 10);
 
-    // Detected poles publisher (colored)
+    // Publicador de los postes detectados
     poles_cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
         "/detected_poles", 10);
 
-    // Publisher for cylinder centers
+    // Publicador de los centros
     cylinder_centers_pub_ = this->create_publisher<std_msgs::msg::String>(
         "/pole/cylinders_center", 10);
 
@@ -113,13 +111,13 @@ void PoleDetector::cloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr 
 
 
 
-// Detect far poles without RANSAC
+// Detectar postes lejanos
 bool PoleDetector::isPoleLikeSimple(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cluster) {
     if (cluster->size() < 3) {
         return false;
     }
 
-    // Calculate dimensions
+    // Calcular dimensiones
     pcl::PointXYZ min_pt, max_pt;
     pcl::getMinMax3D(*cluster, min_pt, max_pt);
     
@@ -127,12 +125,12 @@ bool PoleDetector::isPoleLikeSimple(const pcl::PointCloud<pcl::PointXYZ>::Ptr& c
     double depth = max_pt.y - min_pt.y;
     double height = max_pt.z - min_pt.z;
     
-    // Flexible criteria for far poles
+    // Criterios para los postes
     double max_horizontal = std::max(width, depth);
     double aspect_ratio = height / max_horizontal;
     
-    // Tall and thin criteria (relaxed)
-    bool good_aspect_ratio = (aspect_ratio > 1.0);
+    // Criterios de altura y anchura
+    bool good_aspect_ratio = (aspect_ratio > 5.0);
     bool narrow_width = (max_horizontal < 1.6);
     bool sufficient_height = (height > 0.4);
 
