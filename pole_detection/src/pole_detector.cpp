@@ -291,7 +291,7 @@ bool PoleDetector::isCylindrical(const pcl::PointCloud<pcl::PointXYZ>::Ptr& clus
         return false;
     }
 
-    // Calculate dimensions
+    // Calcular dimensiones
     pcl::PointXYZ min_pt, max_pt;
     pcl::getMinMax3D(*cluster, min_pt, max_pt);
 
@@ -299,15 +299,15 @@ bool PoleDetector::isCylindrical(const pcl::PointCloud<pcl::PointXYZ>::Ptr& clus
     double depth = max_pt.y - min_pt.y;
     double height = max_pt.z - min_pt.z;
 
-    // Cylindrical shape criteria
+    // Criterio de forma cilíndrica
     double max_horizontal = std::max(width, depth);
     double aspect_ratio = height / max_horizontal;
 
-    // Tall and thin
+    // Alto y delgado
     bool good_aspect_ratio = (aspect_ratio > min_cylindrical_aspect_ratio_);
     bool narrow_width = (max_horizontal < max_cylindrical_width_);
 
-    // PCA for linear shape verification
+    // PCA para la verificacion de la linealidad
     pcl::PCA<pcl::PointXYZ> pca;
     pca.setInputCloud(cluster);
     Eigen::Vector3f eigenvalues = pca.getEigenValues();
@@ -324,7 +324,7 @@ std::optional<std::pair<double, double>> PoleDetector::fitCylinderRANSAC(const p
         return std::nullopt;
     }
 
-    // --- Optional: filter out low points (base or ground noise) ---
+    // Filtrar los puntos bajos
     pcl::PointCloud<pcl::PointXYZ>::Ptr upper_cluster(new pcl::PointCloud<pcl::PointXYZ>());
     for (const auto& p : cluster->points) {
         if (p.z > 0.3) {  // keep points above 30 cm
@@ -335,7 +335,7 @@ std::optional<std::pair<double, double>> PoleDetector::fitCylinderRANSAC(const p
         return std::nullopt;
     }
 
-    // Estimate normals
+    // Estimar las normales
     pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> ne;
     pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>());
     ne.setSearchMethod(tree);
@@ -345,7 +345,7 @@ std::optional<std::pair<double, double>> PoleDetector::fitCylinderRANSAC(const p
     pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>());
     ne.compute(*normals);
 
-    // Orient normals toward the sensor
+    // Orientar las normales hacia el sensor
     Eigen::Vector3f viewpoint(0.0f, 0.0f, 0.0f);
     for (auto& n : normals->points) {
         Eigen::Vector3f normal(n.normal_x, n.normal_y, n.normal_z);
@@ -356,7 +356,7 @@ std::optional<std::pair<double, double>> PoleDetector::fitCylinderRANSAC(const p
         }
     }
 
-    // RANSAC cylinder segmentation
+    // Segmentacion de cilindro del RANSAC
     pcl::SACSegmentationFromNormals<pcl::PointXYZ, pcl::Normal> seg;
     seg.setOptimizeCoefficients(true);
     seg.setModelType(pcl::SACMODEL_CYLINDER);
